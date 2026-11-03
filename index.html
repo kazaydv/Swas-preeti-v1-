@@ -1145,6 +1145,109 @@ html,body{overflow-x:clip !important;}
       im.addEventListener('error',function(){ var t=im.closest('.thumb'); if(t){ t.style.display='none'; } else { im.style.display='none'; } });
     });
   })();
+  /* ================================================================
+   PREETI -> UNICODE (Devanagari) auto-converter
+   Converts every element with class="preeti-text" on page load.
+   - Only text nodes are touched (HTML tags/classes stay intact)
+   - Existing Unicode Devanagari passes through unchanged
+   - English words listed in PROTECT stay in English
+   - Wrap any other English in <span class="keep-en">...</span>
+   ================================================================ */
+(function () {
+  'use strict';
+
+  // English words/phrases that must NOT be converted (add more if needed)
+  var PROTECT = /(SWAS|Mouth\s?[Pp]atch|Mouthpatch|muscle memory|Obstructive Sleep Apnea|Sleep Apnea|OSA|WhatsApp|Cash on Delivery)/g;
+
+  // Placeholder for the "{" key (reph), repositioned after mapping
+  var REPH = '\uE000';
+
+  var MAP = {
+    // lowercase
+    'a':'ब','b':'द','c':'अ','d':'म','e':'भ','f':'ा','g':'न','h':'ज','i':'ष्','j':'व','k':'प','l':'ि','m':'स',
+    'n':'ल','o':'य','p':'उ','q':'त्र','r':'च','s':'क','t':'त','u':'ग','v':'ख','w':'ध','x':'ह','y':'थ','z':'श',
+    // uppercase
+    'A':'ब्','B':'द्','C':'ऋ','D':'म्','E':'भ्','F':'ँ','G':'न्','H':'ज्','I':'क्ष्','J':'व्','K':'प्','L':'ी',
+    'M':'ः','N':'ल्','O':'इ','P':'ए','Q':'त्त','R':'च्','S':'क्','T':'त्','U':'ग्','V':'ख्','W':'ध्','X':'ह्',
+    'Y':'थ्','Z':'श्',
+    // number row (unshifted = consonants)
+    '1':'ज्ञ','2':'द्द','3':'घ','4':'द्ध','5':'छ','6':'ट','7':'ठ','8':'ड','9':'ढ','0':'ण',
+    // number row (shifted = digits)
+    '!':'१','@':'२','#':'३','$':'४','%':'५','^':'६','&':'७','*':'८','(':'९',')':'०',
+    // punctuation keys
+    '`':'ञ','~':'ञ्','-':'(','_':')','=':'.','+':'ं',
+    '[':'ृ',']':'े','{':REPH,'}':'ै','\\':'्','|':'्र',
+    ';':'स',':':'स्','\'':'ु','"':'ू',
+    ',':',','.':'।','/':'र','<':'?','>':'श्र','?':'रु',
+    // special glyphs used by Preeti
+    '›':'द्र','¿':'रू','Û':'!','ª':'ङ','Î':'ङ्ख','å':'द्व','¢':'द्य','¤':'झ','ç':'ॐ'
+  };
+
+  var C = '[\\u0915-\\u0939]';                         // any consonant
+  var CLUSTER = '(?:' + C + '\\u094D)*' + C;           // C्C्C
+  var MATRAS = '[\\u093E-\\u094C\\u0901-\\u0903\\u0945]*';
+  var RE_I_MATRA = new RegExp('\\u093F(' + CLUSTER + ')', 'g');
+  var RE_REPH = new RegExp('(' + CLUSTER + MATRAS + ')' + REPH, 'g');
+
+  function convertChunk(s) {
+    var out = '';
+    for (var i = 0; i < s.length; i++) {
+      var ch = s.charAt(i);
+      out += Object.prototype.hasOwnProperty.call(MAP, ch) ? MAP[ch] : ch;
+    }
+    out = out.replace(RE_I_MATRA, '$1\u093F');          // ि goes AFTER its consonant cluster
+    out = out.replace(RE_REPH, '\u0930\u094D$1');       // र् goes BEFORE its syllable
+    out = out
+      .replace(/\u093E\u0947/g, '\u094B')               // ा + े = ो
+      .replace(/\u093E\u0948/g, '\u094C')               // ा + ै = ौ
+      .replace(/\u0905\u093E/g, '\u0906')               // अ + ा = आ
+      .replace(/\u0906\u0947/g, '\u0913')               // आ + े = ओ
+      .replace(/\u0906\u0948/g, '\u0914')               // आ + ै = औ
+      .replace(/\u0909\u0942/g, '\u090A')               // उ + ू = ऊ
+      .replace(new RegExp(REPH, 'g'), '\u0930\u094D');  // any leftover reph
+    return out;
+  }
+
+  function convertText(str) {
+    var parts = str.split(PROTECT);  // odd indexes = protected English
+    for (var i = 0; i < parts.length; i += 2) parts[i] = convertChunk(parts[i]);
+    return parts.join('');
+  }
+
+  var done = new WeakSet();
+
+  function convertElement(root) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        var p = n.parentNode;
+        if (!p || /^(SCRIPT|STYLE|NOSCRIPT)$/.test(p.nodeName)) return NodeFilter.FILTER_REJECT;
+        if (p.closest && p.closest('.keep-en')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (n) {
+      if (done.has(n) || !n.nodeValue.trim()) return;
+      n.nodeValue = convertText(n.nodeValue);
+      done.add(n);
+    });
+  }
+
+  function run() {
+    document.querySelectorAll('.preeti-text').forEach(function (el) {
+      try { convertElement(el); } catch (e) { console.error('Preeti convert error', e); }
+      el.classList.add('pt-done');   // reveals the element (see CSS)
+    });
+  }
+
+  // Use window.convertPreeti(element) for content added later
+  window.convertPreeti = function (el) { convertElement(el); el.classList.add('pt-done'); };
+  window.preetiToUnicode = convertText;
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
 </script>
 </body>
 </html>
